@@ -2,13 +2,36 @@
 
 A React.js application with Tailwind CSS for analyzing and improving website SEO.
 
-## Features
+# 🚀 AI-Powered SEO Audit Tool
+
+A full-stack SEO dashboard that integrates **Google PageSpeed Insights** for real-time performance metrics and **Google Gemini AI** to generate actionable optimization reports.
+
+## ✨ Features
+* **Real-Time Analysis:** Fetches Core Web Vitals (LCP, FID, CLS) using the PageSpeed API.
+* **AI Recommendations:** Uses Gemini AI to explain technical issues in plain English.
+* **Custom Scraper:** Node.js/Express backend to extract internal SEO tags (Meta descriptions, H1s).
+* **Comparison Mode:** Analyze two competitor URLs side-by-side (In Progress).
 
 - Website URL audit
 - Performance analysis
 - SEO score tracking
 - Dashboard with statistics
 - Audit results display
+
+## 🛠️ Tech Stack
+* **Frontend:** React.js, Tailwind CSS, Lucide React
+* **Backend:** Node.js, Express.js
+* **APIs:** Google PageSpeed Insights, Google Gemini AI
+
+## 🚧 Known Issues / Roadmap
+* **API Rate Limiting:** Occasionally hitting 429 errors with PageSpeed API (Fix in progress).
+* **Comparison Logic:** The dual-fetch logic for the Compare page is currently under refinement.
+
+## 📦 How to Run
+1.  Clone the repo
+2.  Install dependencies: `npm install`
+3.  Create a `.env` file with your API keys (see `.env.example`)
+4.  Start server: `npm start`
 
 ## Prerequisites
 
@@ -66,3 +89,5 @@ seo-audit-tool/
 ## License
 
 MIT
+
+
