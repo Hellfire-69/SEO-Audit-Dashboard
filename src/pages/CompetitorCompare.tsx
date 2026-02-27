@@ -33,11 +33,21 @@ function CompetitorCompare() {
 
     // Call Google PageSpeed Insights API
     const pageSpeedKey = process.env.REACT_APP_PAGESPEED_API_KEY || '';
+    const encodedUrl = encodeURIComponent(fullUrl);
     const pagespeedUrl = pageSpeedKey 
-      ? `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(fullUrl)}&key=${pageSpeedKey}`
-      : `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(fullUrl)}`;
+      ? `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodedUrl}&key=${pageSpeedKey}`
+      : `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodedUrl}`;
     
-    const psResponse = await fetch(pagespeedUrl);
+    // Debug: Log the URL being fetched
+    console.log('Fetching URL:', pagespeedUrl);
+    console.log('API Key present:', pageSpeedKey ? 'Yes' : 'No');
+    
+    let psResponse;
+    try {
+      psResponse = await fetch(pagespeedUrl);
+    } catch (networkError: any) {
+      throw new Error(`Network error: ${networkError.message}`);
+    }
     
     if (!psResponse.ok) {
       // Check for 429 rate limit error
@@ -76,18 +86,22 @@ function CompetitorCompare() {
     setDataA(null);
     setDataB(null);
     
+    // Normalize URLs - prepend https:// if missing
+    const normalizedUrlA = urlA.trim().startsWith('http://') || urlA.trim().startsWith('https://') ? urlA.trim() : 'https://' + urlA.trim();
+    const normalizedUrlB = urlB.trim().startsWith('http://') || urlB.trim().startsWith('https://') ? urlB.trim() : 'https://' + urlB.trim();
+    
     // Initialize with loading state
-    setDataA({ url: urlA, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: true, error: null });
-    setDataB({ url: urlB, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: true, error: null });
+    setDataA({ url: normalizedUrlA, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: true, error: null });
+    setDataB({ url: normalizedUrlB, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: true, error: null });
     
     try {
-      // Use Promise.all to fetch both URLs simultaneously
+      // Use Promise.all to fetch both URLs with normalized URLs
       const [resultA, resultB] = await Promise.all([
-        fetchAuditData(urlA).catch(err => ({ 
-          url: urlA, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: false, error: err.message 
+        fetchAuditData(normalizedUrlA).catch(err => ({ 
+          url: normalizedUrlA, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: false, error: err.message 
         })),
-        fetchAuditData(urlB).catch(err => ({ 
-          url: urlB, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: false, error: err.message 
+        fetchAuditData(normalizedUrlB).catch(err => ({ 
+          url: normalizedUrlB, score: 0, performance: 0, seo: 0, accessibility: 0, bestPractices: 0, loading: false, error: err.message 
         }))
       ]);
       

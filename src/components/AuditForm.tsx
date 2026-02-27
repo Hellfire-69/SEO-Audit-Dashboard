@@ -12,154 +12,134 @@ function AuditForm() {
   const { isDark } = useTheme();
 
   const handleReset = () => {
-    // Clear URL input
     setUrl('');
-    // Reset dashboard state
     resetDashboard();
+  };
+
+  const sanitizeUrl = (input: string) => {
+    let url = input.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+    return url;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Assuming Vite or CRA, ensure your API keys are loaded. 
+    const pageSpeedKey = process.env.REACT_APP_PAGESPEED_API_KEY;
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+    if (!pageSpeedKey) {
+      setError('CRITICAL ERROR: API Key is missing. Check .env');
+      return;
+    }
+
     if (!url.trim()) return;
 
-    // Reset dashboard BEFORE starting new audit - this clears old scores immediately
     resetDashboard();
-    
     setLoading(true);
+    setError(null);
     
     try {
-      // Make sure URL has protocol
-      let fullUrl = url.trim();
-      if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
-        fullUrl = 'https://' + fullUrl;
-      }
+      const cleanUrl = sanitizeUrl(url);
 
-      // Call our backend API for SEO data
-      const seoResponse = await fetch('http://localhost:5000/api/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: fullUrl })
-      });
+      // 1. Setup default SEO Data in case your backend fails
+      let seoData = { titleLength: 0, metaDescriptionLength: 0, h1Count: 0, imagesWithoutAlt: 0 };
 
-      let seoData = {
-        titleLength: 0,
-        metaDescriptionLength: 0,
-        h1Count: 0,
-        imagesWithoutAlt: 0
-      };
-
-      if (seoResponse.ok) {
-        seoData = await seoResponse.json();
-      }
-
-      // Call Google PageSpeed Insights API - use env variable
-      const pageSpeedKey = process.env.REACT_APP_PAGESPEED_API_KEY || '';
-      const pagespeedUrl = pageSpeedKey 
-        ? `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(fullUrl)}&key=${pageSpeedKey}`
-        : `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(fullUrl)}`;
+      // 2. Fire BOTH requests concurrently
+      const pageSpeedUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(cleanUrl)}&key=${process.env.REACT_APP_PAGESPEED_API_KEY}&category=performance&category=seo&category=accessibility&category=best-practices`;
       
-      let pagespeedData = null;
-      try {
-        const psResponse = await fetch(pagespeedUrl);
-        
-        // Handle different HTTP status codes with specific error messages
-        if (psResponse.status === 400) {
-          throw new Error('400: Bad Request - The URL may be invalid. Please check the URL and try again.');
-        }
-        if (psResponse.status === 401) {
-          throw new Error('401: Invalid API key. Please check REACT_APP_PAGESPEED_API_KEY in your .env file.');
-        }
-        if (psResponse.status === 403) {
-          throw new Error('403: API key disabled. Please check your Google Cloud Console.');
-        }
-        if (psResponse.status === 429) {
-          throw new Error('429: Rate limit exceeded. Please wait a moment and try again.');
-        }
-        
-        if (psResponse.ok) {
-          pagespeedData = await psResponse.json();
-        } else {
-          const errorText = await psResponse.text();
-          throw new Error(`PageSpeed API error (${psResponse.status}): ${errorText}`);
-        }
-      } catch (psError: any) {
-        console.log('PageSpeed API error:', psError);
-        // Re-throw specific errors to be handled by outer catch
-        if (psError.message?.includes('400:') || 
-            psError.message?.includes('401:') || 
-            psError.message?.includes('403:') || 
-            psError.message?.includes('429:') ||
-            psError.message?.includes('PageSpeed API error')) {
-          throw psError;
-        }
+      const [seoResult, psResult] = await Promise.allSettled([
+        fetch(`${apiUrl}/api/scrape`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanUrl })
+        }).then(res => {
+            if (!res.ok) throw new Error('Local API failed');
+            return res.json();
+        }),
+        fetch(pageSpeedUrl).then(res => {
+            if (!res.ok) throw new Error(`Google API HTTP Error: ${res.status}`);
+            return res.json();
+        })
+      ]);
+
+      // 3. Handle Local SEO Response securely
+      if (seoResult.status === 'fulfilled') {
+        seoData = seoResult.value;
+      } else {
+        console.warn("Backend scrape failed, proceeding with default SEO data:", seoResult.reason);
       }
 
-      // Extract metrics from PageSpeed response - throw error if API fails
+      // 4. Handle PageSpeed Response strictly (This one is mandatory)
+      if (psResult.status === 'rejected') {
+         throw new Error(psResult.reason.message);
+      }
+
+      const pagespeedData = psResult.value;
+
+      if (pagespeedData?.id && typeof pagespeedData.id === 'string' && pagespeedData.id.includes('sorry')) {
+        throw new Error('Google rate-limited this request or flagged it as a bot.');
+      }
+
       const lighthouse = pagespeedData?.lighthouseResult;
       const categories = lighthouse?.categories;
-      
-      if (!categories?.performance?.score || !categories?.seo?.score || !categories?.accessibility?.score || !categories?.['best-practices']?.score) {
-        throw new Error('Failed to fetch complete audit data from Google PageSpeed API. Please check the URL and try again.');
-      }
-      
-      const performance = Math.round(categories.performance.score * 100);
-      const accessibility = Math.round(categories.accessibility.score * 100);
-      const bestPractices = Math.round(categories['best-practices'].score * 100);
-      const seoScore = Math.round(categories.seo.score * 100);
 
-      // Extract Core Web Vitals with display values
-      const metrics = pagespeedData?.lighthouseResult?.audits;
+      if (!categories) {
+        throw new Error("Failed to extract Lighthouse categories. The URL might be unreachable by Google.");
+      }
+
+      // --- The rest of your data extraction logic remains the same ---
+      const performance = Math.round((categories.performance?.score ?? 0) * 100);
+const seoScore = Math.round((categories.seo?.score ?? 0) * 100);
+const accessibility = Math.round((categories.accessibility?.score ?? 0) * 100);
+const bestPractices = Math.round((categories['best-practices']?.score ?? 0) * 100);
+
+      const metrics = lighthouse?.audits;
       const coreWebVitals: CoreWebVitals = {
-        lcp: metrics?.['largest-contentful-paint']?.numericValue || null,
-        lcpDisplayValue: metrics?.['largest-contentful-paint']?.displayValue || undefined,
-        cls: metrics?.['cumulative-layout-shift']?.numericValue || null,
-        clsDisplayValue: metrics?.['cumulative-layout-shift']?.displayValue || undefined,
-        fid: metrics?.['max-potential-fid']?.numericValue || null,
-        fidDisplayValue: metrics?.['max-potential-fid']?.displayValue || undefined,
-        fcp: metrics?.['first-contentful-paint']?.numericValue || null,
-        fcpDisplayValue: metrics?.['first-contentful-paint']?.displayValue || undefined,
-        si: metrics?.['speed-index']?.numericValue || null,
-        siDisplayValue: metrics?.['speed-index']?.displayValue || undefined
+        lcp: metrics?.['largest-contentful-paint']?.numericValue ?? null,
+        lcpDisplayValue: metrics?.['largest-contentful-paint']?.displayValue ?? undefined,
+        cls: metrics?.['cumulative-layout-shift']?.numericValue ?? null,
+        clsDisplayValue: metrics?.['cumulative-layout-shift']?.displayValue ?? undefined,
+        fid: metrics?.['max-potential-fid']?.numericValue ?? null,
+        fidDisplayValue: metrics?.['max-potential-fid']?.displayValue ?? undefined,
+        fcp: metrics?.['first-contentful-paint']?.numericValue ?? null,
+        fcpDisplayValue: metrics?.['first-contentful-paint']?.displayValue ?? undefined,
+        si: metrics?.['speed-index']?.numericValue ?? null,
+        siDisplayValue: metrics?.['speed-index']?.displayValue ?? undefined
       };
 
-      // Extract detailed diagnostics from failed audits
       const diagnostics: DiagnosticItem[] = [];
-      const audits = pagespeedData?.lighthouseResult?.audits || {};
-      
-      // Loop through all audits and filter for failed ones
+      const audits = lighthouse?.audits ?? {};
+
       Object.entries(audits).forEach(([key, audit]: [string, any]) => {
-        // Check if audit failed (score < 1 and not passed)
         const score = audit.score;
         const detailsType = audit.details?.type;
-        const category = audit.details?.type === 'opportunity' ? 'performance' : 
-                        key.includes('seo') ? 'seo' :
-                        key.includes('accessibility') ? 'accessibility' :
-                        key.includes('best-practices') ? 'best-practices' : 'performance';
-        
-        // Include opportunities, failed audits, and SEO issues
+        const category = audit.details?.type === 'opportunity' ? 'performance' :
+                         key.includes('seo') ? 'seo' :
+                         key.includes('accessibility') ? 'accessibility' :
+                         key.includes('best-practices') ? 'best-practices' : 'performance';
+
         if ((score !== null && score < 1) || detailsType === 'opportunity' || detailsType === 'table') {
-          // Skip passed audits
           if (score === 1) return;
-          
+
           diagnostics.push({
             id: key,
-            title: audit.title || key,
-            description: audit.description || '',
-            displayValue: audit.displayValue || '',
-            category: category,
+            title: audit.title ?? key,
+            description: audit.description ?? '',
+            displayValue: audit.displayValue ?? '',
+            category,
             score: score !== null ? score * 100 : 0
           });
         }
       });
 
-      // Limit to top 10 most important diagnostics
       const topDiagnostics = diagnostics.slice(0, 10);
-
-      // Calculate overall score
       const overallScore = Math.round((performance + seoScore + accessibility + bestPractices) / 4);
 
-      // Count issues
-      const issuesCount = 
+      const issuesCount =
         (seoData.titleLength < 30 || seoData.titleLength > 60 ? 1 : 0) +
         (seoData.metaDescriptionLength < 120 || seoData.metaDescriptionLength > 160 ? 1 : 0) +
         (seoData.h1Count === 0 ? 1 : 0) +
@@ -169,7 +149,7 @@ function AuditForm() {
 
       const newAudit: AuditResult = {
         id: Date.now().toString(),
-        url: fullUrl,
+        url: cleanUrl,
         date: new Date().toISOString(),
         score: overallScore,
         performance,
@@ -182,21 +162,19 @@ function AuditForm() {
       };
 
       addAudit(newAudit);
-      
       setUrl('');
-    } catch (error: any) {
-      console.error("FULL API ERROR:", error);
+
+    } catch (err: any) {
+      console.error("AUDIT PIPELINE ERROR:", err);
       
-      // Check for 429 rate limit error or missing API key
-      const errorMessage = error?.message || '';
-      const isRateLimit = errorMessage.includes('429') || 
-                         errorMessage.toLowerCase().includes('rate limit') ||
-                         errorMessage.toLowerCase().includes('api key');
+      const errorMessage = err?.message?.toLowerCase() || '';
       
-      if (isRateLimit) {
-        setError('Rate limit exceeded or missing API key. Please check your .env configuration.');
+      if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+        setError('Google API rate limit exceeded. Slow down or check your billing setup.');
+      } else if (errorMessage.includes('failed to fetch')) {
+        setError('Network error. Check your connection or verify the URL is publicly accessible.');
       } else {
-        setError(errorMessage || 'Failed to complete audit. Please check the URL and try again.');
+        setError(err.message || 'Audit failed. Check the URL and try again.');
       }
     } finally {
       setLoading(false);

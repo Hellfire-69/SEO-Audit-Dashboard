@@ -14,20 +14,43 @@ function AuditResults() {
 
   const latestAudit = currentAudit;
 
-  // Clear recommendations when audit is reset
+  // Single Source of Truth for AI Fetching
   useEffect(() => {
+    // 1. If no audit exists (cleared), wipe the slate clean
     if (!latestAudit) {
       setRecommendations([]);
       setLoadingMessage('');
+      setLoadingRecommendations(false);
+      return;
     }
-  }, [latestAudit]);
 
-  // Auto-trigger AI recommendations when audit is available
-  useEffect(() => {
-    if (latestAudit && recommendations.length === 0 && !loadingRecommendations) {
-      handleGetRecommendations();
-    }
-  }, [latestAudit]);
+    // 2. If an audit exists, define our fetcher
+    const fetchRecommendations = async () => {
+      setLoadingRecommendations(true);
+      setLoadingMessage('AI analyzing results with Gemini...');
+      
+      try {
+        const prompt = formatAuditResultsForLLM(latestAudit);
+        const recs = await getLLMRecommendations(prompt);
+        setRecommendations(recs);
+      } catch (error) {
+        console.error('Failed to get recommendations:', error);
+        setRecommendations([
+          '• Critical Error: AI generation failed.',
+          '• Check your Google Cloud API key restrictions.',
+          '• Ensure you are using gemini-2.5-flash model.'
+        ]);
+      } finally {
+        setLoadingMessage('');
+        setLoadingRecommendations(false);
+      }
+    };
+
+    // 3. Wipe old recommendations immediately so the UI shows it's thinking, then fetch
+    setRecommendations([]);
+    fetchRecommendations();
+    
+  }, [latestAudit?.id]); // Trigger ONLY when the specific audit ID changes
 
   const toggleDiagnostic = (id: string) => {
     const newExpanded = new Set(expandedDiagnostics);
@@ -94,30 +117,7 @@ function AuditResults() {
     return 'text-red-400';
   };
 
-  const handleGetRecommendations = async () => {
-    if (!latestAudit) return;
 
-    setLoadingRecommendations(true);
-    setLoadingMessage('Analyzing with AI...');
-    
-    try {
-      setLoadingMessage('AI analyzing results with Gemini...');
-      const prompt = formatAuditResultsForLLM(latestAudit);
-      const recs = await getLLMRecommendations(prompt);
-      setRecommendations(recs);
-      setLoadingMessage('');
-    } catch (error) {
-      console.error('Failed to get recommendations:', error);
-      setLoadingMessage('');
-      setRecommendations([
-        '• Optimize your title tag to 50-60 characters',
-        '• Add meta description between 150-160 characters',
-        '• Include alt text for all images'
-      ]);
-    } finally {
-      setLoadingRecommendations(false);
-    }
-  };
 
   if (!latestAudit) {
     return (

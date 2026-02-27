@@ -1,92 +1,78 @@
-import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getAPIConfig } from './apiConfig';
 
 export function formatAuditResultsForLLM(auditData: any): string {
+  let diagnosticsText = '';
+  if (auditData.diagnostics && auditData.diagnostics.length > 0) {
+    diagnosticsText = auditData.diagnostics.map((d: any) => 
+      `- Issue: ${d.title}\n  Details: ${d.description}`
+    ).join('\n\n');
+  } else {
+    diagnosticsText = 'No specific critical diagnostics reported.';
+  }
+
   return `
-URL: ${auditData.url}
-Date: ${new Date(auditData.date).toLocaleDateString()}
-Overall Score: ${auditData.score}%
+You are a friendly, expert SEO consultant speaking directly to a non-technical small business owner.
+I ran a website audit on (${auditData.url}). 
 
-Performance Metrics:
-- Performance: ${auditData.performance}%
-- SEO: ${auditData.seo}%
-- Accessibility: ${auditData.accessibility}%
-- Best Practices: ${auditData.bestPractices}%
+Here are the issues found:
+${diagnosticsText}
 
-Core Web Vitals:
-- LCP: ${auditData.coreWebVitals?.lcp ? `${(auditData.coreWebVitals.lcp / 1000).toFixed(2)}s` : 'N/A'}
-- CLS: ${auditData.coreWebVitals?.cls ? auditData.coreWebVitals.cls.toFixed(3) : 'N/A'}
-- FID: ${auditData.coreWebVitals?.fid ? `${auditData.coreWebVitals.fid.toFixed(0)}ms` : 'N/A'}
-- FCP: ${auditData.coreWebVitals?.fcp ? `${(auditData.coreWebVitals.fcp / 1000).toFixed(2)}s` : 'N/A'}
+YOUR TASK:
+Explain the 3 most critical issues in plain, simple English. Tell the user exactly what is wrong and how to fix it in a way a beginner can understand.
 
-Issues Found: ${auditData.issuesCount}
-
-Please provide 3 actionable recommendations to improve this website's SEO performance. Focus on specific, practical steps that can be implemented.
+STRICT RULES:
+1. Do NOT write an introductory sentence.
+2. Do NOT write a concluding sentence.
+3. Do NOT use markdown bolding (like **this**). 
+4. Start your response immediately with the first recommendation.
 `;
 }
 
 export async function getLLMRecommendations(prompt: string): Promise<string[]> {
   try {
-    // Get API config (throws error if missing)
     const { geminiApiKey } = getAPIConfig();
-    
-    // Initialize Gemini AI
+    if (!geminiApiKey) throw new Error("Missing Gemini API Key");
+
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    // Create the SEO-focused prompt
-    const seoPrompt = `You are an expert SEO auditor. I just scanned a website and got these metrics: ${prompt}
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Gemini API timeout')), 15000)
+    );
 
-Write a 3-bullet-point summary of the most critical issues and exactly how a developer should fix them. Keep each bullet point concise but actionable.`;
-
-    // Generate content
-    const result = await model.generateContent(seoPrompt);
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      timeoutPromise
+    ]) as any;
+    
     const response = result.response;
     const content = response.text();
 
-    // Split by newlines and filter empty lines
     const lines = content.split('\n').filter((line: string) => line.trim().length > 0);
-    
-    // Extract bullet points (handle various formats like "-", "•", "*", or numbered)
     const recommendations: string[] = [];
+    
     for (const line of lines) {
-      // Remove bullet characters and numbering
-      const cleaned = line.replace(/^[\d\.\)\-\*\•]+\s*/, '').trim();
-      if (cleaned.length > 10) { // Filter out very short lines
+      // Strips out bullets, numbers, and any stray markdown asterisks
+      const cleaned = line.replace(/^[\d\.\)\-\*\•]+\s*/, '').replace(/\*\*/g, '').trim();
+      
+      if (cleaned.length > 15) { 
         recommendations.push(cleaned);
       }
     }
 
-    // If we got recommendations, return them
     if (recommendations.length > 0) {
-      return recommendations.slice(0, 3); // Limit to 3
+      return recommendations.slice(0, 3);
     }
 
-    // Fallback if parsing fails
-    return [
-      '• Optimize your title tag to 50-60 characters',
-      '• Add meta description between 150-160 characters',
-      '• Include alt text for all images'
-    ];
+    throw new Error("Empty response");
 
   } catch (error: any) {
-    console.error('LLM API error:', error);
-    
-    // Provide helpful error messages based on the error type
-    if (error.message?.includes('API key')) {
-      throw new Error('Invalid or missing API key. Please check your .env configuration.');
-    }
-    
-    if (error.message?.includes('quota')) {
-      throw new Error('API quota exceeded. Please try again later or check your billing.');
-    }
-    
-    // Return fallback recommendations on error
+    console.error('LLM Pipeline Error:', error);
     return [
-      '• Optimize your title tag to 50-60 characters',
-      '• Add meta description between 150-160 characters',
-      '• Include alt text for all images'
+      'Your website is taking a little too long to load. Try compressing your images.',
+      'Make sure every page has a clear, descriptive title for search engines.',
+      'Check your website on a mobile phone to ensure buttons are easy to tap.'
     ];
   }
 }

@@ -55,12 +55,17 @@ function TechnicalReport() {
         securityStatusValue = data.securityStatus.isSecure === true ? 'secure' : 'not-secure';
       }
       
+      // Fix: Handle imagesWithoutAlt - backend returns array of objects, we need count
+      const imagesWithoutAltCount = Array.isArray(data.imagesWithoutAlt) 
+        ? data.imagesWithoutAlt.length 
+        : (typeof data.imagesWithoutAlt === 'number' ? data.imagesWithoutAlt : 0);
+      
       setTechnicalData({
         url: fullUrl,
         titleLength: data.titleLength || 0,
         metaDescriptionLength: data.metaDescriptionLength || 0,
         h1Count: data.h1Count || 0,
-        imagesWithoutAlt: data.imagesWithoutAlt || 0,
+        imagesWithoutAlt: imagesWithoutAltCount,
         securityStatus: securityStatusValue,
         loading: false,
         error: null
